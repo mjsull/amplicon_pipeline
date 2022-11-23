@@ -1,0 +1,136 @@
+configfile: workflow.source_path("config.yaml")
+workdir: config["workdir"]
+
+
+onsuccess:
+    print("Workflow finished, no error")
+
+onerror:
+    print("An error occurred")
+
+rule copy_files:
+    params:
+        reference = workflow.source_path("data/mpx.reference.fasta"),
+    output:
+        reference = "data/mpx.reference.fasta"
+    shell:
+        "cp {params.reference} {output.reference}"
+
+
+rule cat_reads:
+    params:
+        ont_folder = config["ont_folder"],
+        barcode = config["barcode"]
+    output:
+        reads = "data/reads.fastq.gz"
+    shell:
+        "cat {params.ont_folder}/fastq_pass/{params.barcode}/*.fastq.gz > {output.reads}"
+
+
+
+
+rule consensus_call:
+    input:
+        reference = "data/mpx.reference.fasta",
+        reads = "data/reads.fastq.gz"
+    output:
+        consensus = "data/medaka/consensus.fasta",
+        bam = "data/medaka/calls_to_draft.bam"
+    shell:
+        "medaka_consensus -i {input.reads} -d {input.reference} -o data/medaka -g"
+
+
+rule blast_consensus:
+    input:
+        reference = "data/mpx.reference.fasta",
+        consensus = "data/medaka/consensus.fasta"
+    output:
+        blast = "data/blast.out"
+    shell:
+        "blastn -query {input.consensus} -subject {input.reference} -outfmt 4 -out {output.blast}"
+
+rule get_depth:
+    input:
+        bam = "data/medaka/calls_to_draft.bam"
+    output:
+        cov = "data/depth.tsv"
+    shell:
+        "samtools depth -aa {input.bam} > {output.cov}"
+    
+
+
+
+rule trim_consensus:
+    input:
+        consensus = "data/medaka/consensus.fasta",
+        cov = "data/depth.tsv",
+        blast = "data/blast.out"
+    output:
+        fasta = "data/consensus.trimmed.fasta",
+        log = "data/log.txt"
+    script:
+        "scripts/trim_consensus.py"
+
+
+
+
+###################### METAGENOMIC rules
+
+rule trim_reads:
+    params:
+        trim = "ILLUMINACLIP:NexteraPE-PE.fa:2:30:10 LEADING:3 TRAILING:3 SLIDINGWINDOW:4:15 MINLEN:36"
+    input:
+        read1 = config["illumina_read_1"],
+        read2 = config["illumina_read_2"]
+    output:
+        read1_trimmed = "data/read1.fastq.gz",
+        read2_trimmed = "data/read2.fastq.gz"
+    shell:
+        "trimmomatic PE -threads 32 {input.read1} {input.read2} {output.read1_trimmed} data/unpaired1.fastq.gz "
+        "{output.read2_trimmed} data/unpaired2.fastq.gz {params.trim}"
+
+rule map_host:
+    params:
+        host_reference = workflow.source_path("data/GRCh38_latest_genomic.fna.gz")
+    input:
+        read1 = "data/read1.fastq.gz",
+        read2 = "data/read2.fastq.gz"
+    output:
+        "data/human_alignments.paf"
+    shell:
+        "minimap2 -x sr -t 32 {params.host_reference} {input.read1} {input.read2} > {output}"
+
+rule filter_human:
+    input:
+        read1 = "data/read1.fastq.gz",
+        read2 = "data/read2.fastq.gz",
+        human_paf = "data/human_alignments.paf"
+    output:
+        read1 = "data/read1.filtered.fastq.gz",
+        read2 = "data/read2.filtered.fastq.gz"
+    script:
+        "scripts/filter_human.py"
+
+rule map_reference:
+    params:
+        reference = workflow.source_path("data/mpx.reference.fasta")
+    input:
+        read1 = "data/read1.filtered.fastq.gz",
+        read2 = "data/read2.filtered.fastq.gz"
+    output:
+        bam = "data/aligned.sorted.bam",
+        bai = "data/aligned.sorted.bam.bai"
+    shell:
+        "minimap2 -ax sr -t 32 {params.reference} {input.read1} {input.read2} | samtools sort -o {output.bam} - && samtools index {output.bam}"
+
+rule consensus:
+    input:
+        bam = "data/aligned.sorted.bam",
+        reference = "data/mpx.reference.fasta"
+    output:
+        consensus = "data/consensus.fasta"
+    shell:
+        "pilon --genome {input.reference} --frags {input.bam} --outdir data/ --output consensus"
+
+
+
