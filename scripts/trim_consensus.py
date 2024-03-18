@@ -1,7 +1,3 @@
-
-primers = [["ortho", 83196, 83215, 83661, 83680],
-           ["mpx", 159434, 159450, 159823, 159839]]
-
 seq_dict = {}
 with open(snakemake.input.consensus) as f:
     for line in f:
@@ -15,10 +11,18 @@ with open(snakemake.input.cov) as f:
     cov = {}
     for line in f:
         ref, pos, depth = line.split()
+        if not ref in cov:
+            cov[ref] = {}
         depth = int(depth)
-        cov[int(pos)] = depth
+        cov[ref][int(pos)] = depth
 
+primers = []
+with open(snakemake.input.primers) as f:
+    for line in f:
+        if line.split()[0] == snakemake.params.reference:
+            primers.append([line.split()[1], int(line.split()[2]), int(line.split()[3]), int(line.split()[4]), int(line.split()[5])])
 
+print(primers)
 with open(snakemake.input.blast) as f:
     trim_dict = {}
     for line in f:
