@@ -54,11 +54,11 @@ with open(snakemake.input.blast) as f:
                     qls = False
                 else:
                     qls = False
-                if line[i] == " ":
+                if i < len(line) and line[i] == " ":
                     if not rls:
                         rp += 1
                     rls = True
-                elif rp == 2 and line[i] != " " and rpos is None:
+                elif rpos is None and rp == 2 and line[i] != " ":
                     rpos = rstart
                     rls = False
                 else:
@@ -84,10 +84,13 @@ with open(snakemake.output.log, 'w') as o:
     for i in seq_dict:
         name, pos = i.split()
         start, stop = map(int, pos.split('-'))
+        if start == 0:
+            start = 1
         total_depth = 0
         length = stop - start + 1
+        cov_name = "_".join(name.split("_")[:-1])
         for j in range(start, stop+1):
-            total_depth += cov[j]
+            total_depth += cov[cov_name][j]
         depth = total_depth/length
         overlapping_primers = []
         for j in primers:
